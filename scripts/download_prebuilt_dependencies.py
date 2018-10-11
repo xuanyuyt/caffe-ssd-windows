@@ -16,7 +16,7 @@ WIN_DEPENDENCIES_URLS = {
                   "ba833d86d19b162a04d68b09b06df5e0dad947d4"),
     ('v140', '2.7'):("https://github.com/willyd/caffe-builder/releases/download/v1.1.0/libraries_v140_x64_py27_1.1.0.tar.bz2",
                   "17eecb095bd3b0774a87a38624a77ce35e497cd2"),
-    ('v140', '3.5'):("https://github.com/willyd/caffe-builder/releases/download/v1.1.0/libraries_v140_x64_py35_1.1.0.tar.bz2",
+    ('v140', '3.6'):("https://github.com/willyd/caffe-builder/releases/download/v1.1.0/libraries_v140_x64_py35_1.1.0.tar.bz2",
                   "f060403fd1a7448d866d27c0e5b7dced39c0a607"),
 }
 

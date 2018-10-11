@@ -1,3 +1,4 @@
+- [x] copy from: [caffe-ssd-windows](https://github.com/runhang/caffe-ssd-windows) 
 # Windows Caffe
 
 **这是一个测试版本，我已经将[ssd](https://github.com/weiliu89/caffe/tree/ssd)的Linux版本移植到Windows平台**
