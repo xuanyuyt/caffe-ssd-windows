@@ -13,6 +13,7 @@ void DetectionEvaluateLayer<Dtype>::LayerSetUp(
       const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   const DetectionEvaluateParameter& detection_evaluate_param =
       this->layer_param_.detection_evaluate_param();
+  ignore_label_id_ = detection_evaluate_param.ignore_label_id();
   CHECK(detection_evaluate_param.has_num_classes())
       << "Must provide num_classes.";
   num_classes_ = detection_evaluate_param.num_classes();
@@ -90,7 +91,7 @@ void DetectionEvaluateLayer<Dtype>::Forward_cpu(
   // Retrieve all ground truth (including difficult ones).
   map<int, LabelBBox> all_gt_bboxes;
   GetGroundTruth(gt_data, bottom[1]->height(), background_label_id_,
-                 true, &all_gt_bboxes);
+                 true, &all_gt_bboxes, ignore_label_id_);
 
   Dtype* top_data = top[0]->mutable_cpu_data();
   caffe_set(top[0]->count(), Dtype(0.), top_data);
@@ -146,9 +147,11 @@ void DetectionEvaluateLayer<Dtype>::Forward_cpu(
       for (LabelBBox::iterator iit = detections.begin();
            iit != detections.end(); ++iit) {
         int label = iit->first;
-        if (label == -1) {
+		/************************************************************************/
+        if (label == -1 || label == ignore_label_id_) {
           continue;
         }
+        /************************************************************************/
         const vector<NormalizedBBox>& bboxes = iit->second;
         for (int i = 0; i < bboxes.size(); ++i) {
           top_data[num_det * 5] = image_id;
@@ -164,9 +167,11 @@ void DetectionEvaluateLayer<Dtype>::Forward_cpu(
       for (LabelBBox::iterator iit = detections.begin();
            iit != detections.end(); ++iit) {
         int label = iit->first;
-        if (label == -1) {
+        /************************************************************************/
+        if (label == -1 || label == ignore_label_id_) {
           continue;
         }
+        /************************************************************************/
         vector<NormalizedBBox>& bboxes = iit->second;
         if (label_bboxes.find(label) == label_bboxes.end()) {
           // No ground truth for current label. All detections become false_pos.

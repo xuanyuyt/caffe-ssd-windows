@@ -68,6 +68,7 @@ void MultiBoxLossLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   loc_bottom_vec_.push_back(&loc_gt_);
   loc_loss_.Reshape(loss_shape);
   loc_top_vec_.push_back(&loc_loss_);
+  // Set up localization loss layer.
   if (loc_loss_type_ == MultiBoxLossParameter_LocLossType_L2) {
     LayerParameter layer_param;
     layer_param.set_name(this->layer_param_.name() + "_l2_loc");
@@ -102,6 +103,7 @@ void MultiBoxLossLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
     layer_param.add_loss_weight(Dtype(1.));
     layer_param.mutable_loss_param()->set_normalization(
         LossParameter_NormalizationMode_NONE);
+    layer_param.mutable_loss_param()->set_ignore_label(-1);
     SoftmaxParameter* softmax_param = layer_param.mutable_softmax_param();
     softmax_param->set_axis(1);
     // Fake reshape.
@@ -123,7 +125,36 @@ void MultiBoxLossLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
     conf_pred_.Reshape(conf_shape);
     conf_loss_layer_ = LayerRegistry<Dtype>::CreateLayer(layer_param);
     conf_loss_layer_->SetUp(conf_bottom_vec_, conf_top_vec_);
-  } else {
+  } 
+  /*--------------------------------------Focal_Loss--------------------------------------*/
+  else if (conf_loss_type_ == MultiBoxLossParameter_ConfLossType_FocalLoss) {
+    CHECK_GE(background_label_id_, 0)
+	    << "background_label_id should be within [0, num_classes) for Softmax.";
+	CHECK_LT(background_label_id_, num_classes_)
+	    << "background_label_id should be within [0, num_classes) for Softmax.";
+	LayerParameter layer_param;
+	layer_param.set_name(this->layer_param_.name() + "_focal_conf");
+	layer_param.set_type("FocalLoss");
+	layer_param.add_loss_weight(Dtype(1.));
+	layer_param.mutable_loss_param()->set_normalization(
+	    LossParameter_NormalizationMode_NONE);
+	layer_param.mutable_loss_param()->set_ignore_label(-1);
+
+	FocalLossParameter *focal_loss_param = layer_param.mutable_focal_loss_param();
+	focal_loss_param->set_alpha(multibox_loss_param.fl_alpha());
+	focal_loss_param->set_gamma(multibox_loss_param.fl_gamma());
+	focal_loss_param->set_beta(multibox_loss_param.fl_beta());
+
+	// Fake reshape.
+	vector<int> conf_shape(1, 1);
+	conf_gt_.Reshape(conf_shape);
+	conf_shape.push_back(num_classes_);
+	conf_pred_.Reshape(conf_shape);
+	conf_loss_layer_ = LayerRegistry<Dtype>::CreateLayer(layer_param);
+	conf_loss_layer_->SetUp(conf_bottom_vec_, conf_top_vec_);
+  }
+  /*--------------------------------------Focal_Loss--------------------------------------*/
+  else {
     LOG(FATAL) << "Unknown confidence loss type.";
   }
 }
@@ -166,6 +197,14 @@ void MultiBoxLossLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   GetLocPredictions(loc_data, num_, num_priors_, loc_classes_, share_location_,
                     &all_loc_preds);
 
+  /************************************************************************/
+  // 防止测试时没有反向而不清理
+  if (all_match_indices_.size())
+  {
+    all_match_indices_.clear();
+	all_neg_indices_.clear();
+  }
+  /************************************************************************/
   // Find matches between source bboxes and ground truth bboxes.
   vector<map<int, vector<float> > > all_match_overlaps;
   FindMatches(all_loc_preds, all_gt_bboxes, prior_bboxes, prior_variances,
@@ -217,7 +256,16 @@ void MultiBoxLossLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       conf_shape.push_back(num_classes_);
       conf_gt_.Reshape(conf_shape);
       conf_pred_.Reshape(conf_shape);
-    } else {
+    } 
+	/*****************************************************************************/
+	else if (conf_loss_type_ == MultiBoxLossParameter_ConfLossType_FocalLoss) {
+	  conf_shape.push_back(num_conf_);
+	  conf_gt_.Reshape(conf_shape);
+	  conf_shape.push_back(num_classes_);
+	  conf_pred_.Reshape(conf_shape);
+	}
+	/*****************************************************************************/
+	else {
       LOG(FATAL) << "Unknown confidence loss type.";
     }
     if (!do_neg_mining_) {

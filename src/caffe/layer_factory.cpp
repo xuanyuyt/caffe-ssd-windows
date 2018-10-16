@@ -29,6 +29,8 @@
 #include "caffe/layers/softmax_loss_layer.hpp"
 #include "caffe/layers/smooth_L1_loss_layer.hpp"
 #include "caffe/layers/tanh_layer.hpp"
+#include "caffe/layers/normalize_layer.hpp"
+#include "caffe/layers/focal_loss_layer.hpp"
 #include "caffe/proto/caffe.pb.h"
 
 #ifdef USE_CUDNN
@@ -239,6 +241,12 @@ shared_ptr<Layer<Dtype> > GetSoftmaxWithLossLayer(const LayerParameter& param) {
 }
 REGISTER_LAYER_CREATOR(SoftmaxWithLoss, GetSoftmaxWithLossLayer);
 
+// Get SoftmaxWithLoss layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetFocalLossLayer(const LayerParameter& param) {
+	return shared_ptr<Layer<Dtype> >(new FocalLossLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(FocalLoss, GetFocalLossLayer);
 
 // Get SmoothL1Loss layer according to engine.
 template <typename Dtype>
@@ -249,6 +257,13 @@ REGISTER_LAYER_CREATOR(SmoothL1Loss, GetSmoothL1LossLayer);
 
 
 
+
+// Get normalize layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetNormalizeLayer(const LayerParameter& param) {
+	return shared_ptr<Layer<Dtype> >(new NormalizeLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(Normalize, GetNormalizeLayer);
 
 //////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////

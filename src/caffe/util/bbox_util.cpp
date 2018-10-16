@@ -586,7 +586,7 @@ void DecodeBBoxesAll(const vector<LabelBBox>& all_loc_preds,
 void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
     const vector<NormalizedBBox>& pred_bboxes, const int label,
     const MatchType match_type, const float overlap_threshold,
-    const bool ignore_cross_boundary_bbox,
+    const bool ignore_cross_boundary_bbox, const int ignore_label_id,
     vector<int>* match_indices, vector<float>* match_overlaps) {
   int num_pred = pred_bboxes.size();
   match_indices->clear();
@@ -669,8 +669,16 @@ void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
       break;
     } else {
       CHECK_EQ((*match_indices)[max_idx], -1);
-      (*match_indices)[max_idx] = gt_indices[max_gt_idx];
-      (*match_overlaps)[max_idx] = max_overlap;
+      if (gt_bboxes[gt_indices[max_gt_idx]].label() == ignore_label_id)// 被忽略label
+	  {
+	    (*match_indices)[max_idx] = -2;
+	    (*match_overlaps)[max_idx] = max_overlap;
+	  }
+	  else
+	  {
+	    (*match_indices)[max_idx] = gt_indices[max_gt_idx];
+		(*match_overlaps)[max_idx] = max_overlap;
+	  }
       // Erase the ground truth.
       gt_pool.erase(std::find(gt_pool.begin(), gt_pool.end(), max_gt_idx));
     }
@@ -708,8 +716,16 @@ void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
         if (max_gt_idx != -1) {
           // Found a matched ground truth.
           CHECK_EQ((*match_indices)[i], -1);
-          (*match_indices)[i] = gt_indices[max_gt_idx];
-          (*match_overlaps)[i] = max_overlap;
+          if (gt_bboxes[gt_indices[max_gt_idx]].label() == ignore_label_id)// 被忽略label
+		  {
+		    (*match_indices)[i] = -2;
+		    (*match_overlaps)[i] = max_overlap;
+		  }
+		  else
+		  {
+		    (*match_indices)[i] = gt_indices[max_gt_idx];
+		    (*match_overlaps)[i] = max_overlap;
+		  }
         }
       }
       break;
@@ -746,6 +762,7 @@ void FindMatches(const vector<LabelBBox>& all_loc_preds,
       multibox_loss_param.encode_variance_in_target();
   const bool ignore_cross_boundary_bbox =
       multibox_loss_param.ignore_cross_boundary_bbox();
+  const int ignore_label_id = multibox_loss_param.ignore_label_id();
   // Find the matches.
   int num = all_loc_preds.size();
   for (int i = 0; i < num; ++i) {
@@ -774,7 +791,7 @@ void FindMatches(const vector<LabelBBox>& all_loc_preds,
                      code_type, encode_variance_in_target, clip_bbox,
                      all_loc_preds[i].find(label)->second, &loc_bboxes);
         MatchBBox(gt_bboxes, loc_bboxes, label, match_type,
-                  overlap_threshold, ignore_cross_boundary_bbox,
+                  overlap_threshold, ignore_cross_boundary_bbox, ignore_label_id,
                   &match_indices[label], &match_overlaps[label]);
       }
     } else {
@@ -783,7 +800,8 @@ void FindMatches(const vector<LabelBBox>& all_loc_preds,
       vector<float> temp_match_overlaps;
       const int label = -1;
       MatchBBox(gt_bboxes, prior_bboxes, label, match_type, overlap_threshold,
-                ignore_cross_boundary_bbox, &temp_match_indices,
+             
+                ignore_cross_boundary_bbox, ignore_label_id, &temp_match_indices,
                 &temp_match_overlaps);
       if (share_location) {
         match_indices[label] = temp_match_indices;
@@ -839,7 +857,8 @@ int CountNumMatches(const vector<map<int, vector<int> > >& all_match_indices,
 
 inline bool IsEligibleMining(const MiningType mining_type, const int match_idx,
     const float match_overlap, const float neg_overlap) {
-  if (mining_type == MultiBoxLossParameter_MiningType_MAX_NEGATIVE) {
+  if (mining_type == MultiBoxLossParameter_MiningType_MAX_NEGATIVE ||
+    mining_type == MultiBoxLossParameter_MiningType_NONE) {
     return match_idx == -1 && match_overlap < neg_overlap;
   } else if (mining_type == MultiBoxLossParameter_MiningType_HARD_EXAMPLE) {
     return true;
@@ -875,7 +894,43 @@ void MineHardExamples(const Blob<Dtype>& conf_blob,
   const bool use_prior_for_nms = multibox_loss_param.use_prior_for_nms();
   const ConfLossType conf_loss_type = multibox_loss_param.conf_loss_type();
   const MiningType mining_type = multibox_loss_param.mining_type();
+  /*****************************************************************************/
+  const float fl_alpha = multibox_loss_param.fl_alpha();
+  const float fl_gamma = multibox_loss_param.fl_gamma();
+  const float fl_beta = multibox_loss_param.fl_beta();
+  /*****************************************************************************/
   if (mining_type == MultiBoxLossParameter_MiningType_NONE) {
+    /*****************************************************************************/
+	const float neg_overlap = multibox_loss_param.neg_overlap();
+	for (int i = 0; i < num; ++i) {
+	  map<int, vector<int> >& match_indices = (*all_match_indices)[i];
+	  const map<int, vector<float> >& match_overlaps = all_match_overlaps[i];
+	  for (map<int, vector<int> >::iterator it = match_indices.begin();
+	    it != match_indices.end(); ++it) {
+		const int label = it->first;
+		int pos = 0, neg = 0, ignore = 0;
+		// Get potential indices and loss pairs.
+		vector<pair<float, int> > loss_indices;
+		for (int m = 0; m < match_indices[label].size(); ++m) {
+		  if (match_indices[label][m] > -1)
+		  {
+		    //是正样本
+			++pos;
+		  }
+		  else if (IsEligibleMining(mining_type, match_indices[label][m],
+		    match_overlaps.find(label)->second[m], neg_overlap)) {
+			//是负样本 
+			++neg;
+		  }
+		  else{
+		    //是待忽略样本
+			match_indices[label][m] = -2;
+			++ignore;
+			}
+		  }
+		}
+	  }
+	/*****************************************************************************/
     return;
   }
   const LocLossType loc_loss_type = multibox_loss_param.loc_loss_type();
@@ -899,9 +954,11 @@ void MineHardExamples(const Blob<Dtype>& conf_blob,
       background_label_id, conf_loss_type, *all_match_indices, all_gt_bboxes,
       &all_conf_loss);
 #else
+  /*****************************************************************************/
   ComputeConfLossGPU(conf_blob, num, num_priors, num_classes,
       background_label_id, conf_loss_type, *all_match_indices, all_gt_bboxes,
       &all_conf_loss);
+  /*****************************************************************************/
 #endif
   vector<vector<float> > all_loc_loss;
   if (mining_type == MultiBoxLossParameter_MiningType_HARD_EXAMPLE) {
@@ -1096,7 +1153,7 @@ template void GetGroundTruth(const double* gt_data, const int num_gt,
 template <typename Dtype>
 void GetGroundTruth(const Dtype* gt_data, const int num_gt,
       const int background_label_id, const bool use_difficult_gt,
-      map<int, LabelBBox>* all_gt_bboxes) {
+      map<int, LabelBBox>* all_gt_bboxes, const int ignore_label_id) {
   all_gt_bboxes->clear();
   for (int i = 0; i < num_gt; ++i) {
     int start_idx = i * 8;
@@ -1106,6 +1163,10 @@ void GetGroundTruth(const Dtype* gt_data, const int num_gt,
     }
     NormalizedBBox bbox;
     int label = gt_data[start_idx + 1];
+    if (label == ignore_label_id)
+	{
+	  continue;
+	}
     CHECK_NE(background_label_id, label)
         << "Found background label in the dataset.";
     bool difficult = static_cast<bool>(gt_data[start_idx + 7]);
@@ -1127,10 +1188,10 @@ void GetGroundTruth(const Dtype* gt_data, const int num_gt,
 // Explicit initialization.
 template void GetGroundTruth(const float* gt_data, const int num_gt,
       const int background_label_id, const bool use_difficult_gt,
-      map<int, LabelBBox>* all_gt_bboxes);
+      map<int, LabelBBox>* all_gt_bboxes, const int ignore_label_id);
 template void GetGroundTruth(const double* gt_data, const int num_gt,
       const int background_label_id, const bool use_difficult_gt,
-      map<int, LabelBBox>* all_gt_bboxes);
+      map<int, LabelBBox>* all_gt_bboxes, const int ignore_label_id);
 
 template <typename Dtype>
 void GetLocPredictions(const Dtype* loc_data, const int num,
@@ -1405,7 +1466,7 @@ void ComputeConfLoss(const Dtype* conf_data, const int num,
       int start_idx = p * num_classes;
       int label = background_label_id;
       Dtype loss = 0;
-      if (loss_type == MultiBoxLossParameter_ConfLossType_SOFTMAX) {
+      if (loss_type == MultiBoxLossParameter_ConfLossType_SOFTMAX || loss_type == MultiBoxLossParameter_ConfLossType_FocalLoss) {
         CHECK_GE(label, 0);
         CHECK_LT(label, num_classes);
         // Compute softmax probability.
@@ -1487,7 +1548,7 @@ void ComputeConfLoss(const Dtype* conf_data, const int num,
         }
       }
       Dtype loss = 0;
-      if (loss_type == MultiBoxLossParameter_ConfLossType_SOFTMAX) {
+      if (loss_type == MultiBoxLossParameter_ConfLossType_SOFTMAX || loss_type == MultiBoxLossParameter_ConfLossType_FocalLoss) {
         CHECK_GE(label, 0);
         CHECK_LT(label, num_classes);
         // Compute softmax probability.
@@ -1581,9 +1642,15 @@ void EncodeConfPrediction(const Dtype* conf_data, const int num,
         const vector<int>& match_index = it->second;
         CHECK_EQ(match_index.size(), num_priors);
         for (int j = 0; j < num_priors; ++j) {
-          if (match_index[j] <= -1) {
+          if (match_index[j] == -1) {
             continue;
-          }
+		  }
+		  else if (match_index[j] == -2)
+		  {
+		    conf_gt_data[j] = -1;
+			continue;
+		  }
+
           const int gt_label = map_object_to_agnostic ?
             background_label_id + 1 :
             all_gt_bboxes.find(i)->second[match_index[j]].label();
@@ -1595,6 +1662,11 @@ void EncodeConfPrediction(const Dtype* conf_data, const int num,
             case MultiBoxLossParameter_ConfLossType_LOGISTIC:
               conf_gt_data[idx * num_classes + gt_label] = 1;
               break;
+            /*****************************************************************************/
+			case MultiBoxLossParameter_ConfLossType_FocalLoss:
+			  conf_gt_data[idx] = gt_label;
+			  break;
+			/*****************************************************************************/
             default:
               LOG(FATAL) << "Unknown conf loss type.";
           }
@@ -1623,7 +1695,12 @@ void EncodeConfPrediction(const Dtype* conf_data, const int num,
                   background_label_id < num_classes) {
                 conf_gt_data[count * num_classes + background_label_id] = 1;
               }
-              break;
+            break;
+            /*****************************************************************************/
+			case MultiBoxLossParameter_ConfLossType_FocalLoss:
+			  conf_gt_data[count] = background_label_id;
+			  break;
+			/*****************************************************************************/
             default:
               LOG(FATAL) << "Unknown conf loss type.";
           }
@@ -2180,7 +2257,8 @@ void VisualizeBBox(const vector<cv::Mat>& images, const Blob<Dtype>* detections,
   for (int i = 0; i < num_img; ++i) {
     cv::Mat image = images[i];
     // Show FPS.
-    _snprintf(buffer, sizeof(buffer), "FPS: %.2f", fps);
+    //snprintf(buffer, sizeof(buffer), "FPS: %.2f", fps);
+	sprintf_s(buffer, sizeof(buffer), "FPS: %.2f", fps);
     cv::Size text = cv::getTextSize(buffer, fontface, scale, thickness,
                                     &baseline);
     cv::rectangle(image, cv::Point(0, 0),
@@ -2204,8 +2282,10 @@ void VisualizeBBox(const vector<cv::Mat>& images, const Blob<Dtype>* detections,
         cv::Point bottom_right_pt(bboxes[j].xmax(), bboxes[j].ymax());
         cv::rectangle(image, top_left_pt, bottom_right_pt, color, 4);
         cv::Point bottom_left_pt(bboxes[j].xmin(), bboxes[j].ymax());
-        _snprintf(buffer, sizeof(buffer), "%s: %.2f", label_name.c_str(),
-                 bboxes[j].score());
+        /*snprintf(buffer, sizeof(buffer), "%s: %.2f", label_name.c_str(),
+		    bboxes[j].score());*/
+		sprintf_s(buffer, sizeof(buffer), "%s: %.2f", label_name.c_str(),
+		  bboxes[j].score());
         cv::Size text = cv::getTextSize(buffer, fontface, scale, thickness,
                                         &baseline);
         cv::rectangle(

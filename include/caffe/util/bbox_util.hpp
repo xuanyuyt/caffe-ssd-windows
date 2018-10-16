@@ -140,7 +140,7 @@ void DecodeBBoxesAll(const vector<LabelBBox>& all_loc_pred,
 void MatchBBox(const vector<NormalizedBBox>& gt,
     const vector<NormalizedBBox>& pred_bboxes, const int label,
     const MatchType match_type, const float overlap_threshold,
-    const bool ignore_cross_boundary_bbox,
+    const bool ignore_cross_boundary_bbox, const int ignore_label_id,
     vector<int>* match_indices, vector<float>* match_overlaps);
 
 // Find matches between prediction bboxes and ground truth bboxes.
@@ -202,7 +202,7 @@ void GetGroundTruth(const Dtype* gt_data, const int num_gt,
 template <typename Dtype>
 void GetGroundTruth(const Dtype* gt_data, const int num_gt,
       const int background_label_id, const bool use_difficult_gt,
-      map<int, LabelBBox>* all_gt_bboxes);
+      map<int, LabelBBox>* all_gt_bboxes, const int ignore_label_id);
 
 // Get location predictions from loc_data.
 //    loc_data: num x num_preds_per_class * num_loc_classes * 4 blob.

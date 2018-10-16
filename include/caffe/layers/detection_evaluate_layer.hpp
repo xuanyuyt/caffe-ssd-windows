@@ -64,6 +64,7 @@ class DetectionEvaluateLayer : public Layer<Dtype> {
 
   bool has_resize_;
   ResizeParameter resize_param_;
+  int ignore_label_id_;
 };
 
 }  // namespace caffe

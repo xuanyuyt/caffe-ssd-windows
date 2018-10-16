@@ -80,7 +80,7 @@ template <typename Dtype>
 Solver<Dtype>* CreatorSGDSolver(const SolverParameter& param){                                                                            \
     return new SGDSolver<Dtype>(param);
 }
-REGISTER_SOLVER_CREATOR(sgd, CreatorSGDSolver);
+REGISTER_SOLVER_CREATOR(SGD, CreatorSGDSolver);
 
 // AdaDelt
 template <typename Dtype>
