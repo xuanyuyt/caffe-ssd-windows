@@ -31,6 +31,7 @@
 #include "caffe/layers/tanh_layer.hpp"
 #include "caffe/layers/normalize_layer.hpp"
 #include "caffe/layers/focal_loss_layer.hpp"
+#include "caffe/layers/silence_layer.hpp"
 #include "caffe/proto/caffe.pb.h"
 
 #ifdef USE_CUDNN
@@ -264,6 +265,13 @@ shared_ptr<Layer<Dtype> > GetNormalizeLayer(const LayerParameter& param) {
 	return shared_ptr<Layer<Dtype> >(new NormalizeLayer<Dtype>(param));
 }
 REGISTER_LAYER_CREATOR(Normalize, GetNormalizeLayer);
+
+// Get slice_layer layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetSilenceLayer(const LayerParameter& param) {
+	return shared_ptr<Layer<Dtype> >(new SilenceLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(Silence, GetSilenceLayer);
 
 //////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////
