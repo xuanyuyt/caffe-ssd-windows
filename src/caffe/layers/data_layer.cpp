@@ -105,6 +105,6 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
 }
 
 INSTANTIATE_CLASS(DataLayer);
-REGISTER_LAYER_CLASS(Data);
+//REGISTER_LAYER_CLASS(Data);
 
 }  // namespace caffe

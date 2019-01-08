@@ -30,9 +30,12 @@
 #include "caffe/layers/smooth_L1_loss_layer.hpp"
 #include "caffe/layers/tanh_layer.hpp"
 #include "caffe/layers/normalize_layer.hpp"
-#include "caffe/layers/focal_loss_layer.hpp"
 #include "caffe/layers/silence_layer.hpp"
 #include "caffe/proto/caffe.pb.h"
+#include "caffe/layers/focal_loss_layer.hpp"
+#include "caffe/layers/data_layer.hpp"
+#include "caffe/layers/inner_product_layer.hpp"
+#include "caffe/layers/accuracy_layer.hpp"
 
 #ifdef USE_CUDNN
 #include "caffe/layers/cudnn_conv_layer.hpp"
@@ -130,7 +133,7 @@ INSTANTIATE_CLASS(LayerRegisterer);
 
 
 ///////////////////////////////////////////////////////
-// Get Flatten layer according to engine.
+// Get AnnotatedData layer according to engine.
 template <typename Dtype>
 shared_ptr<Layer<Dtype> > GetAnnotatedDataLayer(const LayerParameter& param) {
 	return shared_ptr<Layer<Dtype> >(new AnnotatedDataLayer<Dtype>(param));
@@ -273,8 +276,27 @@ shared_ptr<Layer<Dtype> > GetSilenceLayer(const LayerParameter& param) {
 }
 REGISTER_LAYER_CREATOR(Silence, GetSilenceLayer);
 
+// Get data_layer layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetDataLayer(const LayerParameter& param) {
+  return shared_ptr<Layer<Dtype> >(new DataLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(Data, GetDataLayer);
+
+// Get InnerProduct_layer layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetInnerProductLayer(const LayerParameter& param) {
+  return shared_ptr<Layer<Dtype> >(new InnerProductLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(InnerProduct, GetInnerProductLayer);
+
+// Get AccuracyLayer layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetAccuracyLayer(const LayerParameter& param) {
+  return shared_ptr<Layer<Dtype> >(new AccuracyLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(Accuracy, GetAccuracyLayer);
 //////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////
 
 // Get convolution layer according to engine.
 template <typename Dtype>
