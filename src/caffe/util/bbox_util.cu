@@ -393,27 +393,65 @@ template void ComputeOverlappedGPU(const int nthreads,
           const double* bbox_data, const int num_bboxes, const int num_classes,
           const double overlap_threshold, bool* overlapped_data);
 
-template <typename Dtype>
-__global__ void ComputeOverlappedByIdxKernel(const int nthreads,
-          const Dtype* bbox_data, const Dtype overlap_threshold,
-          const int* idx, const int num_idx, bool* overlapped_data) {
-  CUDA_KERNEL_LOOP(index, nthreads) {
-    const int j = index % num_idx;
-    const int i = (index / num_idx);
-    if (i == j) {
-      // Ignore same bbox.
-      return;
-    }
-    // Compute overlap between i-th bbox and j-th bbox.
-    const int start_loc_i = idx[i] * 4;
-    const int start_loc_j = idx[j] * 4;
-    const Dtype overlap = JaccardOverlapGPU<Dtype>(bbox_data + start_loc_i,
-        bbox_data + start_loc_j);
-    if (overlap > overlap_threshold) {
-      overlapped_data[index] = true;
-    }
-  }
-}
+	template <typename Dtype>
+	__global__ void ComputeOverlappedKernel_1(const int nthreads,
+		const Dtype* pre_bbox_data, const int pre_bbox_Dim, const int pre_bbx_off, \
+		const Dtype* all_gt_bbox_data, const int gt_bbox_Dim, const int gt_bbx_off, \
+		const int pre_num_bboxes, Dtype* all_overlapped_data) {
+		CUDA_KERNEL_LOOP(index, nthreads) {
+			const int p = index % pre_num_bboxes;	//anchor index
+			const int g = index / pre_num_bboxes;	//gt index
+
+			// Compute overlap between i-th gtbbox and j-th prebbox.
+			const int start_loc_p = p * pre_bbox_Dim + pre_bbx_off;
+			const int start_loc_g = g * gt_bbox_Dim + gt_bbx_off;
+			all_overlapped_data[index] = JaccardOverlapGPU<Dtype>(pre_bbox_data + start_loc_p,
+				all_gt_bbox_data + start_loc_g);
+		}
+	}
+
+	template <typename Dtype>
+	void ComputeOverlappedGPU_1(const int nthreads,
+		const Dtype* pre_bbox_data, const int pre_bbox_Dim, const int pre_bbx_off, \
+		const Dtype* all_gt_bbox_data, const int gt_bbox_Dim, const int gt_bbx_off, \
+		const int pre_num_bboxes, Dtype* all_overlapped_data) {
+		// NOLINT_NEXT_LINE(whitespace/operators)
+		ComputeOverlappedKernel_1<Dtype> << <CAFFE_GET_BLOCKS(nthreads),
+			CAFFE_CUDA_NUM_THREADS >> >(nthreads, pre_bbox_data, pre_bbox_Dim, pre_bbx_off, \
+			all_gt_bbox_data, gt_bbox_Dim, gt_bbx_off, pre_num_bboxes, all_overlapped_data);
+		CUDA_POST_KERNEL_CHECK;
+	}
+	
+	template void ComputeOverlappedGPU_1(const int nthreads,
+		const float* pre_bbox_data, const int pre_bbox_Dim, const int pre_bbx_off, \
+		const float* all_gt_bbox_data, const int gt_bbox_Dim, const int gt_bbx_off, \
+		const int pre_num_bboxes, float* all_overlapped_data);
+	template void ComputeOverlappedGPU_1(const int nthreads,
+		const double* pre_bbox_data, const int pre_bbox_Dim, const int pre_bbx_off, \
+		const double* all_gt_bbox_data, const int gt_bbox_Dim, const int gt_bbx_off, \
+		const int pre_num_bboxes, double* all_overlapped_data);
+
+	template <typename Dtype>
+	__global__ void ComputeOverlappedByIdxKernel(const int nthreads,
+		const Dtype* bbox_data, const Dtype overlap_threshold,
+		const int* idx, const int num_idx, bool* overlapped_data) {
+		CUDA_KERNEL_LOOP(index, nthreads) {
+			const int j = index % num_idx;
+			const int i = (index / num_idx);
+			if (i == j) {
+				// Ignore same bbox.
+				return;
+			}
+			// Compute overlap between i-th bbox and j-th bbox.
+			const int start_loc_i = idx[i] * 4;
+			const int start_loc_j = idx[j] * 4;
+			const Dtype overlap = JaccardOverlapGPU<Dtype>(bbox_data + start_loc_i,
+				bbox_data + start_loc_j);
+			if (overlap > overlap_threshold) {
+				overlapped_data[index] = true;
+			}
+		}
+	}
 
 template <typename Dtype>
 void ComputeOverlappedByIdxGPU(const int nthreads,
@@ -537,11 +575,13 @@ template void GetDetectionsGPU(const double* bbox_data, const double* conf_data,
           const int image_id, const int label, const vector<int>& indices,
           const bool clip_bbox, Blob<double>* detection_blob);
 
+/*****************************************************************************/
 template <typename Dtype>
 __global__ void ComputeConfLossKernel(const int nthreads,
     const Dtype* conf_data, const int num_preds_per_class,
     const int num_classes, const ConfLossType loss_type,
-    const Dtype* match_data, Dtype* conf_loss_data) {
+    const Dtype* match_data, Dtype* conf_loss_data,
+	const Dtype fl_alpha, const Dtype fl_gamma, const Dtype fl_beta) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     int label = match_data[index];
     int num = index / num_preds_per_class;
@@ -564,10 +604,18 @@ __global__ void ComputeConfLossKernel(const int nthreads,
         loss -= input * (target - (input >= 0)) -
           log(1 + exp(input - 2 * input * (input >= 0)));
       }
-    }
+	}
+	/*****************************************************************************/
+	else if (loss_type == MultiBoxLossParameter_ConfLossType_FocalLoss) {
+		// Compute softmax probability.
+		Dtype prob = conf_data[start_idx + label];
+		loss = -log(Max(prob, Dtype(FLT_MIN)));
+	}
+	/*****************************************************************************/
     conf_loss_data[index] = loss;
   }
 }
+/*****************************************************************************/
 
 template <typename Dtype>
 void ComputeConfLossGPU(const Blob<Dtype>& conf_blob, const int num,
@@ -575,9 +623,10 @@ void ComputeConfLossGPU(const Blob<Dtype>& conf_blob, const int num,
       const int background_label_id, const ConfLossType loss_type,
       const vector<map<int, vector<int> > >& all_match_indices,
       const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
-      vector<vector<float> >* all_conf_loss) {
+      vector<vector<float> >* all_conf_loss,
+	  const float fl_alpha, const float fl_gamma, const float fl_weight) {
   CHECK_LT(background_label_id, num_classes);
-  Blob<Dtype> match_blob(num, num_preds_per_class, 1, 1);
+  Blob<Dtype> match_blob(num, num_preds_per_class, 1, 1);//匹配结果，label=0是背景，label=1,2...是目标标签
   Dtype* match_data = match_blob.mutable_cpu_data();
   for (int i = 0; i < num; ++i) {
     const map<int, vector<int> >& match_indices = all_match_indices[i];
@@ -608,7 +657,8 @@ void ComputeConfLossGPU(const Blob<Dtype>& conf_blob, const int num,
   const Dtype* conf_gpu_data = conf_blob.gpu_data();
   Blob<Dtype> prob_blob;
   prob_blob.ReshapeLike(conf_blob);
-  if (loss_type == MultiBoxLossParameter_ConfLossType_SOFTMAX) {
+	vector<vector<Dtype>> Test_data;
+  if (loss_type == MultiBoxLossParameter_ConfLossType_SOFTMAX || loss_type == MultiBoxLossParameter_ConfLossType_FocalLoss){
     Dtype* prob_gpu_data = prob_blob.mutable_gpu_data();
     SoftMaxGPU(conf_blob.gpu_data(), num * num_preds_per_class, num_classes, 1,
         prob_gpu_data);
@@ -619,9 +669,12 @@ void ComputeConfLossGPU(const Blob<Dtype>& conf_blob, const int num,
   Dtype* conf_loss_gpu_data = conf_loss_blob.mutable_gpu_data();
   const int num_threads = num * num_preds_per_class;
   // NOLINT_NEXT_LINE(whitespace/operators)
+  /*****************************************************************************/
   ComputeConfLossKernel<Dtype><<<CAFFE_GET_BLOCKS(num_threads),
     CAFFE_CUDA_NUM_THREADS>>>(num_threads, conf_gpu_data, num_preds_per_class,
-        num_classes, loss_type, match_blob.gpu_data(), conf_loss_gpu_data);
+        num_classes, loss_type, match_blob.gpu_data(), conf_loss_gpu_data,
+		fl_alpha, fl_gamma, fl_weight);
+  /*****************************************************************************/
   // Save the loss.
   all_conf_loss->clear();
   const Dtype* loss_data = conf_loss_blob.cpu_data();
@@ -631,19 +684,122 @@ void ComputeConfLossGPU(const Blob<Dtype>& conf_blob, const int num,
     loss_data += num_preds_per_class;
   }
 }
-
+/*****************************************************************************/
 // Explicit initialization.
 template void ComputeConfLossGPU(const Blob<float>& conf_data, const int num,
       const int num_preds_per_class, const int num_classes,
       const int background_label_id, const ConfLossType loss_type,
       const vector<map<int, vector<int> > >& all_match_indices,
       const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
-      vector<vector<float> >* all_conf_loss);
+      vector<vector<float> >* all_conf_loss,
+	  const float fl_alpha, const float fl_gamma, const float fl_beta);
 template void ComputeConfLossGPU(const Blob<double>& conf_data, const int num,
       const int num_preds_per_class, const int num_classes,
       const int background_label_id, const ConfLossType loss_type,
       const vector<map<int, vector<int> > >& all_match_indices,
       const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
-      vector<vector<float> >* all_conf_loss);
+      vector<vector<float> >* all_conf_loss,
+	  const float fl_alpha, const float fl_gamma, const float fl_beta);
+/*****************************************************************************/
+
+/***********************************************************************
+* function: 获取 confrence
+***********************************************************************/
+template <typename Dtype>
+__global__ void ComputeConfKernel(const int nthreads,
+	const Dtype* conf_data, const int num_preds_per_class,
+	const int num_classes, const int loss_type,
+	const Dtype* match_data, Dtype* conf_prob_data) {
+	CUDA_KERNEL_LOOP(index, nthreads) {
+		int label = match_data[index];
+		int num = index / num_preds_per_class;
+		int p = index % num_preds_per_class;
+		int start_idx = (num * num_preds_per_class + p) * num_classes;
+		/*Dtype loss = 0;*/
+		// Compute softmax probability.
+		Dtype prob = conf_data[start_idx + label];
+		/*loss = -log(Max(prob, Dtype(FLT_MIN)));*/
+		conf_prob_data[index] = prob;
+	}
+}
+
+template <typename Dtype>
+void GetConfPredictionsGPU(const Blob<Dtype>& conf_blob, const int num,
+	const int num_preds_per_class, const int num_classes,
+	const int background_label_id, const int loss_type,
+	const vector<map<int, vector<int> > >& all_match_indices,
+	const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+	vector<vector<Dtype> >* all_conf_preds) {
+	CHECK_LT(background_label_id, num_classes);
+	Blob<Dtype> match_blob(num, num_preds_per_class, 1, 1);//匹配结果，label=0是背景，label=1,2...是目标标签
+	Dtype* match_data = match_blob.mutable_cpu_data();
+	for (int i = 0; i < num; ++i) {
+		const map<int, vector<int> >& match_indices = all_match_indices[i];
+		for (int p = 0; p < num_preds_per_class; ++p) {
+			// Get the label index.
+			int label = background_label_id;
+			for (map<int, vector<int> >::const_iterator it =
+				match_indices.begin(); it != match_indices.end(); ++it) {
+				const vector<int>& match_index = it->second;
+				CHECK_EQ(match_index.size(), num_preds_per_class);
+				if (match_index[p] > -1) {
+					CHECK(all_gt_bboxes.find(i) != all_gt_bboxes.end());
+					const vector<NormalizedBBox>& gt_bboxes =
+						all_gt_bboxes.find(i)->second;
+					CHECK_LT(match_index[p], gt_bboxes.size());
+					label = gt_bboxes[match_index[p]].label();
+					CHECK_GE(label, 0);
+					CHECK_NE(label, background_label_id);
+					CHECK_LT(label, num_classes);
+					// A prior can only be matched to one gt bbox.
+					break;
+				}
+			}
+			match_data[i * num_preds_per_class + p] = label;
+		}
+	}
+	// Get probability data.
+	const Dtype* conf_gpu_data = conf_blob.gpu_data();
+	Blob<Dtype> prob_blob;
+	prob_blob.ReshapeLike(conf_blob);
+	Dtype* prob_gpu_data = prob_blob.mutable_gpu_data();
+	SoftMaxGPU(conf_blob.gpu_data(), num * num_preds_per_class, num_classes, 1,
+		prob_gpu_data);
+	conf_gpu_data = prob_blob.gpu_data();
+
+	// Compute the loss.
+	Blob<Dtype> conf_target_blob(num, num_preds_per_class, 1, 1);
+	Dtype* conf_target_gpu_data = conf_target_blob.mutable_gpu_data();
+	const int num_threads = num * num_preds_per_class;
+	// NOLINT_NEXT_LINE(whitespace/operators)
+	/*****************************************************************************/
+	ComputeConfKernel<Dtype> << <CAFFE_GET_BLOCKS(num_threads),
+		CAFFE_CUDA_NUM_THREADS >> >(num_threads, conf_gpu_data, num_preds_per_class,
+		num_classes, loss_type, match_blob.gpu_data(), conf_target_gpu_data);
+	/*****************************************************************************/
+
+	// Save the loss.
+	all_conf_preds->clear();
+	const Dtype* target_prob_data = conf_target_blob.cpu_data();
+
+	for (int i = 0; i < num; ++i) {
+		vector<Dtype> conf_pred(target_prob_data, target_prob_data + num_preds_per_class);
+		all_conf_preds->push_back(conf_pred);
+		target_prob_data += num_preds_per_class;
+	}
+}
+// Explicit initialization.
+template void GetConfPredictionsGPU(const Blob<float>& conf_data, const int num,
+	const int num_preds_per_class, const int num_classes,
+	const int background_label_id, const int loss_type,
+	const vector<map<int, vector<int> > >& all_match_indices,
+	const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+	vector<vector<float> >* all_conf_loss);
+template void GetConfPredictionsGPU(const Blob<double>& conf_data, const int num,
+	const int num_preds_per_class, const int num_classes,
+	const int background_label_id, const int loss_type,
+	const vector<map<int, vector<int> > >& all_match_indices,
+	const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+	vector<vector<double> >* all_conf_loss);
 
 }  // namespace caffe

@@ -526,6 +526,7 @@ message LayerParameter {
   optional PoolingParameter pooling_param = 121;
   optional PowerParameter power_param = 122;
   optional PReLUParameter prelu_param = 131;
+  optional ReLU6Parameter relu6_param = 300;
   optional PriorBoxParameter prior_box_param = 203;
   optional PythonParameter python_param = 130;
   optional RecurrentParameter recurrent_param = 146;
@@ -543,6 +544,12 @@ message LayerParameter {
   optional VideoDataParameter video_data_param = 207;
   optional WindowDataParameter window_data_param = 129;
   optional FocalLossParameter focal_loss_param = 235;
+  optional ShuffleChannelParameter shuffle_channel_param = 164;
+}
+
+// ShuffleChannel for ShuffleNet
+message ShuffleChannelParameter {
+  optional uint32 group = 1[default = 1]; // The number of group
 }
 
 // Focal Loss for Dense Object Detection
@@ -1098,6 +1105,9 @@ message ELUParameter {
   // Deep Network Learning by Exponential Linear Units (ELUs). arXiv
   optional float alpha = 1 [default = 1];
 }
+message ReLU6Parameter {
+  optional float negative_slope = 1 [default = 0];
+}
 
 // Message that stores parameters used by EmbedLayer
 message EmbedParameter {
@@ -1340,11 +1350,13 @@ message MultiBoxLossParameter {
   optional float fl_gamma = 25 [default = 2.0];
   optional float fl_alpha = 26 [default = 0.75];
   optional float fl_beta = 27 [default = 1.0];
-  optional float ignore_overlap = 28 [default = 0];
-  optional float addition_overlap = 29 [default = 0.5];
-  optional uint32 max_match = 30 [default = 8];
-  optional bool match_balance = 31 [default = false];
-  optional int32 ignore_label_id = 32 [default = -1];
+  optional bool only_anchor_match = 28 [default = true]; // if only use anchor->gt match
+  optional bool use_ori_match = 29 [default = false]; // if use original match style
+  optional float ignore_overlap = 30 [default = 0];
+  optional uint32 max_match = 31 [default = 8];
+  optional bool match_balance = 32 [default = false];
+  optional int32 ignore_label_id = 33 [default = -1];
+  optional float conf_weight = 34 [default = 1.0];
 }
 
 message MVNParameter {

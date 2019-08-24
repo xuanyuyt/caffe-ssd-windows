@@ -170,7 +170,7 @@ cmake -G"!CMAKE_GENERATOR!" ^
       -DUSE_NCCL:BOOL=!USE_NCCL! ^
       -DCUDA_ARCH_NAME:STRING=%CUDA_ARCH_NAME% ^
       -DCUDNN_ROOT=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\cuda ^
-      -C "D:\tyang\caffe-builder\build_v140_x64\libraries\caffe-builder-config.cmake" ^
+      -C "D:\caffe-builder\build_v140_x64\libraries\caffe-builder-config.cmake" ^
       "%~dp0\.."
 
 if ERRORLEVEL 1 (

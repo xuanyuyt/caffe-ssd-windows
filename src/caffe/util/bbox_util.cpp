@@ -625,7 +625,7 @@ namespace caffe {
       }
     }
   }
-
+  /*============================ Original Match ============================*/
   void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
     const vector<NormalizedBBox>& pred_bboxes, const int label,
     const MatchType match_type, const float overlap_threshold,
@@ -680,6 +680,7 @@ namespace caffe {
     for (int i = 0; i < num_gt; ++i) {
       gt_pool.push_back(i);
     }
+    // 1. 先为每个 gt box 找在最大匹配（这个最大匹配IOU可能大于0.5也可能小于0.5）
     while (gt_pool.size() > 0) {
       // Find the most overlapped gt and cooresponding predictions.
       int max_idx = -1;
@@ -708,13 +709,14 @@ namespace caffe {
           }
         }
       }
+
       if (max_idx == -1) {
-        // Cannot find good match.
+        // a.如果找不到匹配.
         break;
       }
       else {
         CHECK_EQ((*match_indices)[max_idx], -1);
-        if (gt_bboxes[gt_indices[max_gt_idx]].label() == ignore_label_id)// ±?o???label
+        if (gt_bboxes[gt_indices[max_gt_idx]].label() == ignore_label_id)// 被忽略label
         {
           (*match_indices)[max_idx] = -2;
           (*match_overlaps)[max_idx] = max_overlap;
@@ -761,7 +763,7 @@ namespace caffe {
         if (max_gt_idx != -1) {
           // Found a matched ground truth.
           CHECK_EQ((*match_indices)[i], -1);
-          if (gt_bboxes[gt_indices[max_gt_idx]].label() == ignore_label_id)// ±?o???label
+          if (gt_bboxes[gt_indices[max_gt_idx]].label() == ignore_label_id)// 被忽略label
           {
             (*match_indices)[i] = -2;
             (*match_overlaps)[i] = max_overlap;
@@ -781,14 +783,15 @@ namespace caffe {
 
     return;
   }
-#if 1
+  /*=======================================================================*/
+  /*============================ Match Balance ============================*/
   void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
     const vector<NormalizedBBox>& pred_bboxes, const int label,
     const MatchType match_type, const float overlap_threshold,
-    const float ignore_overlap, const float addition_overlap,
-    const int max_match, const bool match_balance,
-    const bool ignore_cross_boundary_bbox, const int ignore_label_id,
-    vector<int>* match_indices, vector<float>* match_overlaps) {
+    const bool ignore_cross_boundary_bbox,
+    vector<int>* match_indices, vector<float>* match_overlaps,
+    const float ignore_overlap, const int max_match,
+    const bool match_balance, const int ignore_label_id) {
     int num_pred = pred_bboxes.size();
     match_indices->clear();
     match_indices->resize(num_pred, -1);
@@ -842,16 +845,19 @@ namespace caffe {
       gt_pool.push_back(i);
     }
     /**********************************************************************************************
-    * 方案一：如果match_balance=true:
-    * 1. 从ground truth 出发，寻找一个最大匹配：如果max_overlap < ignore_overlap,删去该ground truth
-    * (匹配项进入负样本空间)；
-    * 2. 从anchor出发，随机抽取max_match-1个匹配（新匹配IOU不能比之前的最小匹配IOU差超过0.1）。
-
-    * 方案二：如果match_balance=false:
-    * 1. 从ground truth 出发，寻找一个最大匹配：如果max_overlap < ignore_overlap,删去该ground truth
-    * (匹配项进入负样本空间，如果max_overlap < overlap_threshold，该gt放入gt_pool_for_add；
-    * 2. 从anchor出发，大于overlap_threshold的匹配项（新匹配IOU不能比之前的最小匹配IOU差超过0.1）
-    * 加入正样本空间。
+    仅从anchor出发，将所有匹配按照overlap_threshold进行分组partA、partB
+    如果match_balance: true
+    如果max_match, < partA.size
+    从partA里选择随机选择max_match个匹配作为正样本，未选中的作为忽略样本
+    如果max_match > partA.size
+    先从partA选中所有作为正样本
+    再从partB里选择前max_match-partA.size匹配作为正样本
+    如果match_balance: false
+    如果max_match, < partA.size
+    从partA里选择所有匹配作为正样本
+    如果max_match > partA.size
+    先从partA选中所有作为正样本
+    再从partB里选择前max_match-partA.size匹配作为正样本
     ***********************************************************************************************/
 
     // 1. group match
@@ -920,6 +926,306 @@ namespace caffe {
           int gt_idx = gt_pool[p];
           map<int, vector<pair<int, float>> >::iterator iterA;
           map<int, vector<pair<int, float>> >::iterator iterB;
+          iterA = partA.find(gt_indices[gt_idx]);
+          iterB = partB.find(gt_indices[gt_idx]);
+          int remain_num = max_match;
+          if (iterA != partA.end())
+          {
+            remain_num = std::max(int(max_match - iterA->second.size()), 0);
+            if (iterA->second.size() >= max_match) // 从partA随机抽max_match个匹配
+            {
+              srand(unsigned(time(NULL)));
+              vector<int> randomVec;
+              for (int i = 0; i < iterA->second.size(); ++i)
+              {
+                randomVec.push_back(i);
+              }
+              random_shuffle(randomVec.begin(), randomVec.end());
+              for (int index = 0; index < max_match; ++index)
+              {
+                // Found a matched ground truth.
+                int select_idx = randomVec[index];
+                int anchor_index = iterA->second[select_idx].first;
+                float match_iou = iterA->second[select_idx].second;
+                CHECK_EQ((*match_indices)[anchor_index], -1);
+                if (gt_bboxes[gt_indices[gt_idx]].label() == ignore_label_id)// 被忽略label
+                {
+                  (*match_indices)[anchor_index] = -2;
+                  (*match_overlaps)[anchor_index] = match_iou;
+                }
+                else
+                {
+                  (*match_indices)[anchor_index] = gt_indices[gt_idx];
+                  (*match_overlaps)[anchor_index] = match_iou;
+                }
+              }
+              for (int index = max_match; index < randomVec.size(); ++index)
+              {
+                // Found a matched ground truth.
+                int select_idx = randomVec[index];
+                int anchor_index = iterA->second[select_idx].first;
+                float match_iou = iterA->second[select_idx].second;
+                CHECK_EQ((*match_indices)[anchor_index], -1);
+                (*match_indices)[anchor_index] = -2; // 置为待忽略
+                (*match_overlaps)[anchor_index] = match_iou;
+              }
+            }
+            else // 从partA先抽所有匹配
+            {
+              for (int index = 0; index < iterA->second.size(); ++index)
+              {
+                // Found a matched ground truth.
+                int anchor_index = iterA->second[index].first;
+                float match_iou = iterA->second[index].second;
+                CHECK_EQ((*match_indices)[anchor_index], -1);
+                if (gt_bboxes[gt_indices[gt_idx]].label() == ignore_label_id)// 被忽略label
+                {
+                  (*match_indices)[anchor_index] = -2;
+                  (*match_overlaps)[anchor_index] = match_iou;
+                }
+                else
+                {
+                  min_match_iou[gt_indices[gt_idx]] = match_iou;
+                  (*match_indices)[anchor_index] = gt_indices[gt_idx];
+                  (*match_overlaps)[anchor_index] = match_iou;
+                }
+              }
+            }
+          }
+          if (remain_num > 0) // partA不足max_match，剩下的从partB抽remain_select=min(partB,size(), remain_num)
+          {
+            int remain_select = std::min(remain_num, int(iterB->second.size()));
+            for (int index = 0; index < remain_select; ++index)
+            {
+              // Found a matched ground truth.
+              int anchor_index = iterB->second[index].first;
+              float match_iou = iterB->second[index].second;
+              CHECK_EQ((*match_indices)[anchor_index], -1);
+              if (gt_bboxes[gt_indices[gt_idx]].label() == ignore_label_id)// 被忽略label
+              {
+                (*match_indices)[anchor_index] = -2;
+                (*match_overlaps)[anchor_index] = match_iou;
+              }
+              else if (index == 0 && iterA == partA.end())
+              {
+                min_match_iou[gt_indices[gt_idx]] = match_iou;
+                (*match_indices)[anchor_index] = gt_indices[gt_idx];
+                (*match_overlaps)[anchor_index] = match_iou;
+              }
+              else if (min_match_iou[gt_indices[gt_idx]] - match_iou < 0.1)
+              {
+                min_match_iou[gt_indices[gt_idx]] = match_iou;
+                (*match_indices)[anchor_index] = gt_indices[gt_idx];
+                (*match_overlaps)[anchor_index] = match_iou;
+              }
+            }
+          }
+        }
+      }
+      else
+      {
+        for (int p = 0; p < gt_pool.size(); ++p)
+        {
+          int gt_idx = gt_pool[p];
+          map<int, vector<pair<int, float>> >::iterator iterA;
+          map<int, vector<pair<int, float>> >::iterator iterB;
+          iterA = partA.find(gt_indices[gt_idx]);
+          iterB = partB.find(gt_indices[gt_idx]);
+          int remain_num = max_match;
+          if (iterA != partA.end())
+          {
+            remain_num = std::max(int(max_match - iterA->second.size()), 0);
+            for (int index = 0; index < iterA->second.size(); ++index)
+            {
+              // Found a matched ground truth.
+              int anchor_index = iterA->second[index].first;
+              float match_iou = iterA->second[index].second;
+              CHECK_EQ((*match_indices)[anchor_index], -1);
+              if (gt_bboxes[gt_indices[gt_idx]].label() == ignore_label_id)// 被忽略label
+              {
+                (*match_indices)[anchor_index] = -2;
+                (*match_overlaps)[anchor_index] = match_iou;
+              }
+              else
+              {
+                min_match_iou[gt_indices[gt_idx]] = match_iou;
+                (*match_indices)[anchor_index] = gt_indices[gt_idx];
+                (*match_overlaps)[anchor_index] = match_iou;
+              }
+            }
+          }
+          if (remain_num > 0) // partA不足max_match，剩下的从partB抽remain_select=min(partB,size(), remain_num)
+          {
+            int remain_select = std::min(remain_num, int(iterB->second.size()));
+            for (int index = 0; index < remain_select; ++index)
+            {
+              // Found a matched ground truth.
+              int anchor_index = iterB->second[index].first;
+              float match_iou = iterB->second[index].second;
+              CHECK_EQ((*match_indices)[anchor_index], -1);
+              if (gt_bboxes[gt_indices[gt_idx]].label() == ignore_label_id)// 被忽略label
+              {
+                (*match_indices)[anchor_index] = -2;
+                (*match_overlaps)[anchor_index] = match_iou;
+              }
+              else if (index == 0 && iterA == partA.end())
+              {
+                min_match_iou[gt_indices[gt_idx]] = match_iou;
+                (*match_indices)[anchor_index] = gt_indices[gt_idx];
+                (*match_overlaps)[anchor_index] = match_iou;
+              }
+              else if (min_match_iou[gt_indices[gt_idx]] - match_iou < 0.1)
+              {
+                min_match_iou[gt_indices[gt_idx]] = match_iou;
+                (*match_indices)[anchor_index] = gt_indices[gt_idx];
+                (*match_overlaps)[anchor_index] = match_iou;
+              }
+            }
+          }
+        }
+      }
+      break;
+    default:
+      LOG(FATAL) << "Unknown matching type.";
+      break;
+    }
+
+    return;
+  }
+  /*=======================================================================*/
+  /*========================== Only Anchor Match ===========================*/
+  template <typename Dtype>
+  void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
+    const vector<NormalizedBBox>& pred_bboxes, const int label,
+    const MatchType match_type, const float overlap_threshold,
+    const bool ignore_cross_boundary_bbox,
+    vector<int>* match_indices, vector<float>* match_overlaps,
+    const float ignore_overlap, const int max_match,
+    const bool match_balance, const int ignore_label_id,
+    const Dtype* pre_gt_overlap_cpu) {
+    int num_pred = pred_bboxes.size();
+    match_indices->clear();
+    match_indices->resize(num_pred, -1);
+    match_overlaps->clear();
+    match_overlaps->resize(num_pred, 0.);
+
+    int num_gt = 0;
+    vector<int> gt_indices;
+    if (label == -1) {
+      // label -1 means comparing against all ground truth.
+      num_gt = gt_bboxes.size();
+      for (int i = 0; i < num_gt; ++i) {
+        gt_indices.push_back(i);
+      }
+    }
+    else {
+      // Count number of ground truth boxes which has the desired label.
+      for (int i = 0; i < gt_bboxes.size(); ++i) {
+        if (gt_bboxes[i].label() == label) {
+          num_gt++;
+          gt_indices.push_back(i);
+        }
+      }
+    }
+    if (num_gt == 0) {
+      return;
+    }
+
+    // Bipartite matching.
+    ////////////////////////////////////////////////////////////////////////////
+    map<int, vector<pair<int, float> > > all_matches;
+    ////////////////////////////////////////////////////////////////////////////
+    vector<int> gt_pool;
+    for (int i = 0; i < num_gt; ++i) {
+      gt_pool.push_back(i);
+    }
+    /**********************************************************************************************
+    * 方案一：如果match_balance=true:
+    * 1. 从ground truth 出发，寻找一个最大匹配：如果max_overlap < ignore_overlap,删去该ground truth
+    * (匹配项进入负样本空间)；
+    * 2. 从anchor出发，随机抽取max_match-1个匹配（新匹配IOU不能比之前的最小匹配IOU差超过0.1）。
+
+    * 方案二：如果match_balance=false:
+    * 1. 从ground truth 出发，寻找一个最大匹配：如果max_overlap < ignore_overlap,删去该ground truth
+    * (匹配项进入负样本空间，如果max_overlap < overlap_threshold，该gt放入gt_pool_for_add；
+    * 2. 从anchor出发，大于overlap_threshold的匹配项（新匹配IOU不能比之前的最小匹配IOU差超过0.1）
+    * 加入正样本空间。
+    ***********************************************************************************************/
+
+    // 1. group match
+    map<int, vector<pair<int, float> > > partA;
+    map<int, vector<pair<int, float> > > partB;
+    for (int i = 0; i < num_pred; ++i)
+    {
+      int anchor_i = i;
+      if (ignore_cross_boundary_bbox && (pre_gt_overlap_cpu[i] < 0)) {
+        (*match_indices)[i] = -2;
+        continue;
+      }
+      if ((*match_indices)[anchor_i] != -1) {
+        // The prediction already has matched ground truth or is ignored.
+        continue;
+      }
+
+      int max_gt_idx = -1;
+      float max_overlap = -1;
+
+      for (int p = 0; p < gt_pool.size(); ++p) {
+        int j = gt_pool[p];
+        float overlap = pre_gt_overlap_cpu[j*num_pred + i];
+        if (overlap < ignore_overlap) {
+          // No overlap between the i-th prediction and j-th ground truth.
+          continue;
+        }
+        else
+        {
+          (*match_overlaps)[i] = std::max((*match_overlaps)[i], overlap);
+        }
+        // Find the maximum overlapped pair.
+        if (overlap > ignore_overlap  && overlap > max_overlap) {
+          // If the prediction has not been matched to any ground truth,
+          // and the overlap is larger than maximum overlap, update.
+          max_gt_idx = j;
+          max_overlap = overlap;
+        }
+      } // 寻找最大匹配gt
+      if (max_overlap >= overlap_threshold)
+      {
+        partA[gt_indices[max_gt_idx]].push_back(std::make_pair(anchor_i, max_overlap));
+      }
+      else if (max_overlap >= ignore_overlap)
+      {
+        partB[gt_indices[max_gt_idx]].push_back(std::make_pair(anchor_i, max_overlap));
+      }
+    }
+
+    // 2. sort
+    for (int p = 0; p < gt_pool.size(); ++p)
+    {
+      int j = gt_pool[p];
+      /*std::sort(partA[gt_indices[j]].begin(), partA[gt_indices[j]].end(),
+        SortScorePairDescend2<float>);*/
+      std::sort(partB[gt_indices[j]].begin(), partB[gt_indices[j]].end(),
+        SortScorePairDescend2<float>);
+    }
+
+
+    // 3. 从anchor出发
+    vector<float>min_match_iou(gt_pool.size(), overlap_threshold);
+    switch (match_type) {
+    case MultiBoxLossParameter_MatchType_BIPARTITE:
+      // Already done.
+      break;
+    case MultiBoxLossParameter_MatchType_PER_PREDICTION:
+      // Get most overlaped for the rest prediction bboxes.
+      // 3. match_balance? 
+      if (match_balance)
+      {
+        for (int p = 0; p < gt_pool.size(); ++p)
+        {
+          int gt_idx = gt_pool[p];
+          map<int, vector<pair<int, float> > >::iterator iterA;
+          map<int, vector<pair<int, float> > >::iterator iterB;
           iterA = partA.find(gt_indices[gt_idx]);
           iterB = partB.find(gt_indices[gt_idx]);
           int remain_num = max_match;
@@ -1024,8 +1330,8 @@ namespace caffe {
         for (int p = 0; p < gt_pool.size(); ++p)
         {
           int gt_idx = gt_pool[p];
-          map<int, vector<pair<int, float>> >::iterator iterA;
-          map<int, vector<pair<int, float>> >::iterator iterB;
+          map<int, vector<pair<int, float> > >::iterator iterA;
+          map<int, vector<pair<int, float> > >::iterator iterB;
           iterA = partA.find(gt_indices[gt_idx]);
           iterB = partB.find(gt_indices[gt_idx]);
           int remain_num = max_match;
@@ -1092,16 +1398,33 @@ namespace caffe {
 
     return;
   }
-
-
-#endif 
+  template void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
+    const vector<NormalizedBBox>& pred_bboxes, const int label,
+    const MatchType match_type, const float overlap_threshold,
+    const bool ignore_cross_boundary_bbox,
+    vector<int>* match_indices, vector<float>* match_overlaps,
+    const float ignore_overlap, const int max_match,
+    const bool match_balance, const int ignore_label_id,
+    const float* pre_gt_overlap_cpu);
+  template void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
+    const vector<NormalizedBBox>& pred_bboxes, const int label,
+    const MatchType match_type, const float overlap_threshold,
+    const bool ignore_cross_boundary_bbox,
+    vector<int>* match_indices, vector<float>* match_overlaps,
+    const float ignore_overlap, const int max_match,
+    const bool match_balance, const int ignore_label_id,
+    const double* pre_gt_overlap_cpu);
+  /*=======================================================================*/
+  /*========================== Only Anchor Match ==========================*/
+  template <typename Dtype>
   void FindMatches(const vector<LabelBBox>& all_loc_preds,
     const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
     const vector<NormalizedBBox>& prior_bboxes,
     const vector<vector<float> >& prior_variances,
     const MultiBoxLossParameter& multibox_loss_param,
     vector<map<int, vector<float> > >* all_match_overlaps,
-    vector<map<int, vector<int> > >* all_match_indices) {
+    vector<map<int, vector<int> > >* all_match_indices,
+    const Dtype* pre_gt_overlap_cpu) {
     // all_match_overlaps->clear();
     // all_match_indices->clear();
     // Get parameters.
@@ -1120,13 +1443,14 @@ namespace caffe {
       multibox_loss_param.encode_variance_in_target();
     const bool ignore_cross_boundary_bbox =
       multibox_loss_param.ignore_cross_boundary_bbox();
-    const float ignore_overlap = multibox_loss_param.ignore_overlap();
-    const float addition_overlap = multibox_loss_param.addition_overlap();
-    const int max_match = multibox_loss_param.max_match();
-    const bool match_balance = multibox_loss_param.match_balance();
-    const int ignore_label_id = multibox_loss_param.ignore_label_id();
+    const float ignore_overlap = multibox_loss_param.ignore_overlap(); // 匹配最小阈值
+    const bool match_balance = multibox_loss_param.match_balance(); // 是否匹配平衡
+    const int max_match = multibox_loss_param.max_match(); // 最大匹配数量，同匹配平衡使用
+    const int ignore_label_id = multibox_loss_param.ignore_label_id(); // 忽略类别
     // Find the matches.
     int num = all_loc_preds.size();
+
+    const Dtype* pre_gt_overlap_cpu_cur = pre_gt_overlap_cpu;
     for (int i = 0; i < num; ++i) {
       map<int, vector<int> > match_indices;
       map<int, vector<float> > match_overlaps;
@@ -1153,27 +1477,26 @@ namespace caffe {
             code_type, encode_variance_in_target, clip_bbox,
             all_loc_preds[i].find(label)->second, &loc_bboxes);
           MatchBBox(gt_bboxes, loc_bboxes, label, match_type,
-            overlap_threshold, ignore_cross_boundary_bbox, ignore_label_id,
+            overlap_threshold,
+            ignore_cross_boundary_bbox, ignore_label_id,
             &match_indices[label], &match_overlaps[label]);
         }
       }
-      else {
+      else { // here
         // Use prior bboxes to match against all ground truth.
         vector<int> temp_match_indices;
         vector<float> temp_match_overlaps;
         const int label = -1;
-#ifdef ADD_PRIOR_BOX
-        MatchBBox(gt_bboxes, prior_bboxes, label, match_type,
-          overlap_threshold, ignore_overlap, addition_overlap,
-          max_match, match_balance,
-          ignore_cross_boundary_bbox, ignore_label_id,
-          &temp_match_indices, &temp_match_overlaps);
-#else
-        MatchBBox(gt_bboxes, prior_bboxes, label, match_type, overlap_threshold,
+        // 这里暂时只支持Only Anchor Match方式
+        MatchBBox(gt_bboxes, prior_bboxes, label,
+          match_type, overlap_threshold,
+          ignore_cross_boundary_bbox,
+          &temp_match_indices, &temp_match_overlaps,
+          ignore_overlap, max_match,
+          match_balance, ignore_label_id,
+          pre_gt_overlap_cpu_cur);
+        pre_gt_overlap_cpu_cur += gt_bboxes.size() * prior_bboxes.size();
 
-          ignore_cross_boundary_bbox, ignore_label_id, &temp_match_indices,
-          &temp_match_overlaps);
-#endif
         if (share_location) {
           match_indices[label] = temp_match_indices;
           match_overlaps[label] = temp_match_overlaps;
@@ -1208,6 +1531,146 @@ namespace caffe {
       all_match_overlaps->push_back(match_overlaps);
     }
   }
+
+  template void FindMatches(const vector<LabelBBox>& all_loc_preds,
+    const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+    const vector<NormalizedBBox>& prior_bboxes,
+    const vector<vector<float> >& prior_variances,
+    const MultiBoxLossParameter& multibox_loss_param,
+    vector<map<int, vector<float> > >* all_match_overlaps,
+    vector<map<int, vector<int> > >* all_match_indices,
+    const float* pre_gt_overlap_cpu);
+  template void FindMatches(const vector<LabelBBox>& all_loc_preds,
+    const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+    const vector<NormalizedBBox>& prior_bboxes,
+    const vector<vector<float> >& prior_variances,
+    const MultiBoxLossParameter& multibox_loss_param,
+    vector<map<int, vector<float> > >* all_match_overlaps,
+    vector<map<int, vector<int> > >* all_match_indices,
+    const double* pre_gt_overlap_cpu);
+  /*=======================================================================*/
+  /*=========================== Anchor GT Match ===========================*/
+  void FindMatches(const vector<LabelBBox>& all_loc_preds,
+    const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+    const vector<NormalizedBBox>& prior_bboxes,
+    const vector<vector<float> >& prior_variances,
+    const MultiBoxLossParameter& multibox_loss_param,
+    vector<map<int, vector<float> > >* all_match_overlaps,
+    vector<map<int, vector<int> > >* all_match_indices) {
+    // all_match_overlaps->clear();
+    // all_match_indices->clear();
+    // Get parameters.
+    CHECK(multibox_loss_param.has_num_classes()) << "Must provide num_classes.";
+    const int num_classes = multibox_loss_param.num_classes();
+    CHECK_GE(num_classes, 1) << "num_classes should not be less than 1.";
+    const bool share_location = multibox_loss_param.share_location();
+    const int loc_classes = share_location ? 1 : num_classes;
+    const MatchType match_type = multibox_loss_param.match_type();
+    const float overlap_threshold = multibox_loss_param.overlap_threshold();
+    const bool use_prior_for_matching =
+      multibox_loss_param.use_prior_for_matching();
+    const int background_label_id = multibox_loss_param.background_label_id();
+    const CodeType code_type = multibox_loss_param.code_type();
+    const bool encode_variance_in_target =
+      multibox_loss_param.encode_variance_in_target();
+    const bool ignore_cross_boundary_bbox =
+      multibox_loss_param.ignore_cross_boundary_bbox();
+    const float ignore_overlap = multibox_loss_param.ignore_overlap(); // 匹配最小阈值
+    const bool match_balance = multibox_loss_param.match_balance(); // 是否匹配平衡
+    const int max_match = multibox_loss_param.max_match(); // 最大匹配数量，同匹配平衡使用
+    const int ignore_label_id = multibox_loss_param.ignore_label_id(); // 忽略类别
+    const bool use_ori_match = multibox_loss_param.use_ori_match(); // 是否采用原始匹配策略
+    // Find the matches.
+    int num = all_loc_preds.size();
+
+    for (int i = 0; i < num; ++i) {
+      map<int, vector<int> > match_indices;
+      map<int, vector<float> > match_overlaps;
+      // Check if there is ground truth for current image.
+      if (all_gt_bboxes.find(i) == all_gt_bboxes.end()) {
+        // There is no gt for current image. All predictions are negative.
+        all_match_indices->push_back(match_indices);
+        all_match_overlaps->push_back(match_overlaps);
+        continue;
+      }
+      // Find match between predictions and ground truth.
+      const vector<NormalizedBBox>& gt_bboxes = all_gt_bboxes.find(i)->second;
+      if (!use_prior_for_matching) {
+        for (int c = 0; c < loc_classes; ++c) {
+          int label = share_location ? -1 : c;
+          if (!share_location && label == background_label_id) {
+            // Ignore background loc predictions.
+            continue;
+          }
+          // Decode the prediction into bbox first.
+          vector<NormalizedBBox> loc_bboxes;
+          bool clip_bbox = false;
+          DecodeBBoxes(prior_bboxes, prior_variances,
+            code_type, encode_variance_in_target, clip_bbox,
+            all_loc_preds[i].find(label)->second, &loc_bboxes);
+          MatchBBox(gt_bboxes, loc_bboxes, label, match_type,
+            overlap_threshold,
+            ignore_cross_boundary_bbox, ignore_label_id,
+            &match_indices[label], &match_overlaps[label]);
+        }
+      }
+      else { // here
+        // Use prior bboxes to match against all ground truth.
+        vector<int> temp_match_indices;
+        vector<float> temp_match_overlaps;
+        const int label = -1;
+        if (use_ori_match)
+        {
+          MatchBBox(gt_bboxes, prior_bboxes, label, match_type,
+            overlap_threshold, ignore_cross_boundary_bbox, ignore_label_id,
+            &temp_match_indices, &temp_match_overlaps);
+        }
+        else
+        {
+          MatchBBox(gt_bboxes, prior_bboxes, label, match_type,
+            overlap_threshold, ignore_cross_boundary_bbox,
+            &temp_match_indices, &temp_match_overlaps,
+            ignore_overlap, max_match,
+            match_balance, ignore_label_id
+            );
+        }
+
+        if (share_location) {
+          match_indices[label] = temp_match_indices;
+          match_overlaps[label] = temp_match_overlaps;
+        }
+        else {
+          // Get ground truth label for each ground truth bbox.
+          vector<int> gt_labels;
+          for (int g = 0; g < gt_bboxes.size(); ++g) {
+            gt_labels.push_back(gt_bboxes[g].label());
+          }
+          // Distribute the matching results to different loc_class.
+          for (int c = 0; c < loc_classes; ++c) {
+            if (c == background_label_id) {
+              // Ignore background loc predictions.
+              continue;
+            }
+            match_indices[c].resize(temp_match_indices.size(), -1);
+            match_overlaps[c] = temp_match_overlaps;
+            for (int m = 0; m < temp_match_indices.size(); ++m) {
+              if (temp_match_indices[m] > -1) {
+                const int gt_idx = temp_match_indices[m];
+                CHECK_LT(gt_idx, gt_labels.size());
+                if (c == gt_labels[gt_idx]) {
+                  match_indices[c][m] = gt_idx;
+                }
+              }
+            }
+          }
+        }
+      }
+      all_match_indices->push_back(match_indices);
+      all_match_overlaps->push_back(match_overlaps);
+    }
+  }
+  /*=======================================================================*/
+
 
   int CountNumMatches(const vector<map<int, vector<int> > >& all_match_indices,
     const int num) {
@@ -1331,7 +1794,7 @@ namespace caffe {
     /*****************************************************************************/
     ComputeConfLossGPU(conf_blob, num, num_priors, num_classes,
       background_label_id, conf_loss_type, *all_match_indices, all_gt_bboxes,
-      &all_conf_loss);
+      &all_conf_loss, fl_alpha, fl_gamma, fl_beta);
     /*****************************************************************************/
 #endif
     vector<vector<float> > all_loc_loss;
@@ -2454,6 +2917,69 @@ namespace caffe {
     void ApplyNMSFast(const double* bboxes, const double* scores, const int num,
       const float score_threshold, const float nms_threshold,
       const float eta, const int top_k, vector<int>* indices);
+
+  template <typename Dtype>
+  void ApplySoftNMSFast(const Dtype* bboxes, Dtype* scores, const int num,
+    const float score_threshold, const float nms_threshold,
+    const float eta, const int top_k, vector<int>* indices) {
+    // Get top_k scores (with corresponding indices).
+    vector<pair<Dtype, int> > score_index_vec;
+    GetMaxScoreIndex(scores, num, score_threshold, top_k, &score_index_vec);
+
+    // Do soft-nms
+    indices->clear();
+    // weight for linear weight
+    float weight;
+
+    while (score_index_vec.size() != 0) {
+      // find the highest score
+      Dtype max_score = score_index_vec.front().first;
+      int max_score_idx = score_index_vec.front().second;
+
+      // add max_score_id in indices
+      indices->push_back(max_score_idx);
+
+      // iteration over all other boxes
+      for (int i = 1; i < score_index_vec.size(); i++) {
+        int idx = score_index_vec[i].second;
+        float overlap = JaccardOverlap(bboxes + max_score_idx * 4, bboxes + idx * 4);
+        if (overlap < nms_threshold) {
+          weight = 1;
+        }
+        else {
+          weight = 1 - overlap;
+        }
+        //std::cout << "iou: " << overlap << std::endl;
+        //std::cout << "origin weight: " << score_index_vec[i].first << " weight: " << weight;
+        float tmp_score = score_index_vec[i].first * weight;
+        if (tmp_score > score_threshold) {
+          score_index_vec[i].first = tmp_score;
+          //std::cout << " tmp score: " << tmp_score << std::endl;
+          scores[idx] = tmp_score;
+        }
+        else {
+          score_index_vec.erase(score_index_vec.begin() + i);
+          i -= 1;
+        }
+
+      }
+      // remove max_score_id in score_index_vec
+      score_index_vec.erase(score_index_vec.begin());
+      std::sort(score_index_vec.begin(), score_index_vec.end(),
+        SortScorePairDescend<int>);
+    }
+  }
+
+  template
+    void ApplySoftNMSFast(const float* bboxes, float* scores, const int num,
+    const float score_threshold, const float nms_threshold,
+    const float eta, const int top_k, vector<int>* indices);
+  template
+    void ApplySoftNMSFast(const double* bboxes, double* scores, const int num,
+    const float score_threshold, const float nms_threshold,
+    const float eta, const int top_k, vector<int>* indices);
+
+
 
   void CumSum(const vector<pair<float, int> >& pairs, vector<int>* cumsum) {
     // Sort the pairs based on first item of the pair.

@@ -36,6 +36,9 @@
 #include "caffe/layers/data_layer.hpp"
 #include "caffe/layers/inner_product_layer.hpp"
 #include "caffe/layers/accuracy_layer.hpp"
+#include "caffe/layers/conv_dw_layer.hpp"
+#include "caffe/layers/relu6_layer.hpp"
+#include "caffe/layers/shuffle_channel_layer.hpp"
 
 #ifdef USE_CUDNN
 #include "caffe/layers/cudnn_conv_layer.hpp"
@@ -245,12 +248,34 @@ shared_ptr<Layer<Dtype> > GetSoftmaxWithLossLayer(const LayerParameter& param) {
 }
 REGISTER_LAYER_CREATOR(SoftmaxWithLoss, GetSoftmaxWithLossLayer);
 
-// Get SoftmaxWithLoss layer according to engine.
+// Get FocalLoss layer according to engine.
 template <typename Dtype>
 shared_ptr<Layer<Dtype> > GetFocalLossLayer(const LayerParameter& param) {
 	return shared_ptr<Layer<Dtype> >(new FocalLossLayer<Dtype>(param));
 }
 REGISTER_LAYER_CREATOR(FocalLoss, GetFocalLossLayer);
+
+// Get ConvolutionDepthwise layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetConvolutionDepthwiseLayer(const LayerParameter& param) {
+	return shared_ptr<Layer<Dtype> >(new ConvolutionDepthwiseLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(ConvolutionDepthwise, GetConvolutionDepthwiseLayer);
+
+// Get ReLU6 layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetReLU6Layer(const LayerParameter& param) {
+	return shared_ptr<Layer<Dtype> >(new ReLU6Layer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(ReLU6, GetReLU6Layer);
+
+
+// Get ShuffleChanne layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetShuffleChannelLayer(const LayerParameter& param) {
+	return shared_ptr<Layer<Dtype> >(new ShuffleChannelLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(ShuffleChannel, GetShuffleChannelLayer);
 
 // Get SmoothL1Loss layer according to engine.
 template <typename Dtype>
@@ -462,7 +487,7 @@ shared_ptr<Layer<Dtype> > GetSigmoidLayer(const LayerParameter& param) {
 
 REGISTER_LAYER_CREATOR(Sigmoid, GetSigmoidLayer);
 
-// Get softmax layer according to engine.
+// Get Softmax layer according to engine.
 template <typename Dtype>
 shared_ptr<Layer<Dtype> > GetSoftmaxLayer(const LayerParameter& param) {
   SoftmaxParameter_Engine engine = param.softmax_param().engine();
