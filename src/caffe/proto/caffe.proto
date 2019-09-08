@@ -543,13 +543,37 @@ message LayerParameter {
   optional TileParameter tile_param = 138;
   optional VideoDataParameter video_data_param = 207;
   optional WindowDataParameter window_data_param = 129;
-  optional FocalLossParameter focal_loss_param = 235;
+  optional FocalLossParameter focal_loss_param = 10632;
   optional ShuffleChannelParameter shuffle_channel_param = 164;
+  optional InterpParameter interp_param = 147;
+  optional BNParameter bn_param = 152;
 }
 
-// ShuffleChannel for ShuffleNet
-message ShuffleChannelParameter {
-  optional uint32 group = 1[default = 1]; // The number of group
+// resize layer
+message InterpParameter {
+  optional int32 height = 1 [default = 0]; // Height of output
+  optional int32 width = 2 [default = 0]; // Width of output
+  optional int32 zoom_factor = 3 [default = 1]; // zoom factor
+  optional int32 shrink_factor = 4 [default = 1]; // shrink factor
+  optional int32 pad_beg = 5 [default = 0]; // padding at begin of input
+  optional int32 pad_end = 6 [default = 0]; // padding at end of input
+}
+// cudnn batch normal
+message BNParameter {
+  optional FillerParameter slope_filler = 1;
+  optional FillerParameter bias_filler = 2;
+  optional float momentum = 3 [default = 0.9];
+  optional float eps = 4 [default = 1e-5];
+  // If true, will use the moving average mean and std for training and test.
+  // Will override the lr_param and freeze all the parameters.
+  // Make sure to initialize the layer properly with pretrained parameters.
+  optional bool frozen = 5 [default = false];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    CUDNN = 2;
+  }
+  optional Engine engine = 6 [default = DEFAULT];
 }
 
 // Focal Loss for Dense Object Detection
@@ -564,6 +588,11 @@ message FocalLossParameter {
   // cross-categories weights to solve the imbalance problem
   optional float alpha = 4 [default = 0.25]; 
   optional float beta  = 5 [default = 1.0];
+}
+
+// ShuffleChannel for ShuffleNet
+message ShuffleChannelParameter {
+  optional uint32 group = 1[default = 1]; // The number of group
 }
 
 // Message that stores parameters used to apply transformation

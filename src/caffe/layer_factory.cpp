@@ -31,6 +31,7 @@
 #include "caffe/layers/tanh_layer.hpp"
 #include "caffe/layers/normalize_layer.hpp"
 #include "caffe/layers/silence_layer.hpp"
+#include "caffe/layers/slice_layer.hpp"
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/layers/focal_loss_layer.hpp"
 #include "caffe/layers/data_layer.hpp"
@@ -39,6 +40,10 @@
 #include "caffe/layers/conv_dw_layer.hpp"
 #include "caffe/layers/relu6_layer.hpp"
 #include "caffe/layers/shuffle_channel_layer.hpp"
+#include "caffe/layers/axpy_layer.hpp"
+#include "caffe/layers/bn_layer.hpp"
+#include "caffe/util/interp.hpp"
+#include "caffe/layers/interp_layer.hpp"
 
 #ifdef USE_CUDNN
 #include "caffe/layers/cudnn_conv_layer.hpp"
@@ -49,6 +54,7 @@
 #include "caffe/layers/cudnn_sigmoid_layer.hpp"
 #include "caffe/layers/cudnn_softmax_layer.hpp"
 #include "caffe/layers/cudnn_tanh_layer.hpp"
+#include "caffe/common.cuh"
 #endif
 
 #ifdef WITH_PYTHON_LAYER
@@ -270,12 +276,34 @@ shared_ptr<Layer<Dtype> > GetReLU6Layer(const LayerParameter& param) {
 REGISTER_LAYER_CREATOR(ReLU6, GetReLU6Layer);
 
 
-// Get ShuffleChanne layer according to engine.
+// Get ShuffleChannel layer according to engine.
 template <typename Dtype>
 shared_ptr<Layer<Dtype> > GetShuffleChannelLayer(const LayerParameter& param) {
 	return shared_ptr<Layer<Dtype> >(new ShuffleChannelLayer<Dtype>(param));
 }
 REGISTER_LAYER_CREATOR(ShuffleChannel, GetShuffleChannelLayer);
+
+// Get Axpy layer according to engine in SENet/SKNet.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetAxpyLayer(const LayerParameter& param) {
+	return shared_ptr<Layer<Dtype> >(new AxpyLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(Axpy, GetAxpyLayer);
+
+// Get Interp layer according to engine for resize.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetInterpLayer(const LayerParameter& param) {
+	return shared_ptr<Layer<Dtype> >(new InterpLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(Interp, GetInterpLayer);
+
+// Get cudnn BN layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetBNLayer(const LayerParameter& param) {
+	return shared_ptr<Layer<Dtype> >(new BNLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(BN, GetBNLayer);
+
 
 // Get SmoothL1Loss layer according to engine.
 template <typename Dtype>
@@ -285,8 +313,6 @@ shared_ptr<Layer<Dtype> > GetSmoothL1LossLayer(const LayerParameter& param) {
 REGISTER_LAYER_CREATOR(SmoothL1Loss, GetSmoothL1LossLayer);
 
 
-
-
 // Get normalize layer according to engine.
 template <typename Dtype>
 shared_ptr<Layer<Dtype> > GetNormalizeLayer(const LayerParameter& param) {
@@ -294,12 +320,19 @@ shared_ptr<Layer<Dtype> > GetNormalizeLayer(const LayerParameter& param) {
 }
 REGISTER_LAYER_CREATOR(Normalize, GetNormalizeLayer);
 
-// Get slice_layer layer according to engine.
+// Get Silence_layer layer according to engine.
 template <typename Dtype>
 shared_ptr<Layer<Dtype> > GetSilenceLayer(const LayerParameter& param) {
 	return shared_ptr<Layer<Dtype> >(new SilenceLayer<Dtype>(param));
 }
 REGISTER_LAYER_CREATOR(Silence, GetSilenceLayer);
+
+// Get Slice_layer layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetSliceLayer(const LayerParameter& param) {
+	return shared_ptr<Layer<Dtype> >(new SliceLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(Slice, GetSliceLayer);
 
 // Get data_layer layer according to engine.
 template <typename Dtype>
