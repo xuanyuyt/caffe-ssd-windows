@@ -292,6 +292,12 @@ bool ReadXMLToAnnotatedDatum(const string& labelfile, const int img_height,
             LOG(FATAL) << "Unknown name: " << name;
           }
           int label = name_to_label.find(name)->second;
+          //////////////////////////////////////////////////////////////////////////
+          if (label==0)
+          {
+            break;
+          }
+          //////////////////////////////////////////////////////////////////////////
           bool found_group = false;
           for (int g = 0; g < anno_datum->annotation_group_size(); ++g) {
             AnnotationGroup* anno_group =
